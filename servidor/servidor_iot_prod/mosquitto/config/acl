@@ -1,0 +1,7 @@
+# Telegraf puede leer todos los datos del proyecto
+user telegraf
+topic read utec/gemelo/#
+
+# Cada gateway usa como usuario el nombre de su grupo (grupo1, grupo2...)
+# y solo puede publicar en sus propios tópicos: utec/gemelo/<su grupo>/...
+pattern write utec/gemelo/%u/#

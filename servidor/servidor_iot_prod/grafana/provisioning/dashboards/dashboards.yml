@@ -1,0 +1,8 @@
+# Carga automáticamente los dashboards de /etc/grafana/dashboards
+apiVersion: 1
+providers:
+  - name: gemelo
+    type: file
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards

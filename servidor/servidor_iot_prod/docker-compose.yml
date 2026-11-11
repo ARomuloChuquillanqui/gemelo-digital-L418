@@ -1,0 +1,105 @@
+# Stack IoT de producción: Caddy (HTTPS) + Mosquitto (TLS) + Telegraf + InfluxDB + Grafana público
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"      # evita que los logs llenen el disco
+    max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2.8
+    container_name: caddy
+    ports:
+      - "80:80"           # Let's Encrypt valida el dominio por aquí
+      - "443:443"         # dashboard por HTTPS
+    environment:
+      DOMINIO: ${DOMINIO}
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - grafana
+    restart: unless-stopped
+    logging: *logging
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    ports:
+      - "8883:8883"       # solo MQTT cifrado hacia internet
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/certs:/mosquitto/certs
+      - mosquitto-data:/mosquitto/data
+    restart: unless-stopped
+    logging: *logging
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    ports:
+      - "127.0.0.1:8086:8086"   # NO expuesto a internet; acceso solo por túnel SSH
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: utec
+      DOCKER_INFLUXDB_INIT_BUCKET: gemelo
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+    restart: unless-stopped
+    logging: *logging
+
+  telegraf:
+    image: telegraf:1.32
+    container_name: telegraf
+    depends_on:
+      - mosquitto
+      - influxdb
+    environment:
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      MQTT_USER: telegraf
+      MQTT_PASS: ${MQTT_TELEGRAF_PASS}
+    volumes:
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    restart: unless-stopped
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: grafana
+    depends_on:
+      - influxdb
+    environment:
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      GF_SERVER_DOMAIN: ${DOMINIO}
+      GF_SERVER_ROOT_URL: https://${DOMINIO}/
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_COOKIE_SECURE: "true"
+      # Acceso público de solo lectura, sin cuenta
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_ANONYMOUS_HIDE_VERSION: "true"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # El dashboard del proyecto es la página de inicio
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/dashboard_gemelo_iot.json
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 10s
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/etc/grafana/dashboards
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  caddy-data:
+  caddy-config:
+  mosquitto-data:
+  influxdb-data:
+  influxdb-config:
+  grafana-data:

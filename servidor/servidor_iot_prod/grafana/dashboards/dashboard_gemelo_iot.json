@@ -1,0 +1,802 @@
+{
+  "title": "Gemelo digital — Sensores IoT UTEC",
+  "uid": "gemelo-iot-utec",
+  "tags": [
+    "iot",
+    "gemelo",
+    "utec"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": [
+      {
+        "name": "grupo",
+        "label": "Grupo",
+        "type": "query",
+        "datasource": {
+          "type": "influxdb",
+          "uid": "influxdb-gemelo"
+        },
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"gemelo\", tag: \"grupo\")",
+        "definition": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"gemelo\", tag: \"grupo\")",
+        "refresh": 1,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": [],
+        "hide": 0
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "CO₂ actual",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-gemelo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"co2\" and r._field == \"co2_ppm\" and r.grupo =~ /^${grupo:regex}$/)\n  |> filter(fn: (r) => r._value > 0)\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\", \"nodo\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1000
+              },
+              {
+                "color": "red",
+                "value": 1500
+              }
+            ]
+          },
+          "mappings": [],
+          "unit": "ppm",
+          "displayName": "Nodo ${__field.labels.nodo}",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Estado CO₂",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-gemelo"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"co2\" and r._field == \"nivel\" and r.grupo =~ /^${grupo:regex}$/)\n  |> last()\n  |> keep(columns: [\"_value\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "NORMAL": {
+                  "text": "Normal",
+                  "color": "green",
+                  "index": 0
+                },
+                "ALERTA": {
+                  "text": "Ventilar",
+                  "color": "yellow",
+                  "index": 1
+                },
+                "CRITICO": {
+                  "text": "Crítico",
+                  "color": "red",
+                  "index": 2
+                },
+                "CALENTANDO": {
+                  "text": "Calentando",
+                  "color": "blue",
+                  "index": 3
+                },
+                "SIN_DATO": {
+                  "text": "Sin dato",
+                  "color": "gray",
+                  "index": 4
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": "/.*/"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Leq actual (1 s)",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-gemelo"
+      },
+      "gridPos": {
+        "x": 10,
+        "y": 0,
+        "w": 5,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"audio\" and r._field == \"leq_db\" and r.grupo =~ /^${grupo:regex}$/)\n  |> last()\n  |> keep(columns: [\"_time\", \"_value\", \"nodo\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "mappings": [],
+          "unit": "dB",
+          "displayName": "Nodo ${__field.labels.nodo}",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        }
+      },
+      "description": "dB SPL estimado (sin calibrar, sin ponderación A)."
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Segundos desde el último dato",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-gemelo"
+      },
+      "gridPos": {
+        "x": 15,
+        "y": 0,
+        "w": 5,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "from(bucket: \"gemelo\")\n  |> range(start: -1h)\n  |> filter(fn: (r) => r._field == \"seq\" and r.grupo =~ /^${grupo:regex}$/)\n  |> last()\n  |> map(fn: (r) => ({r with _value: float(v: uint(v: now()) - uint(v: r._time)) / 1000000000.0}))\n  |> keep(columns: [\"_value\", \"_measurement\", \"nodo\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 20
+              },
+              {
+                "color": "red",
+                "value": 60
+              }
+            ]
+          },
+          "mappings": [],
+          "unit": "s",
+          "displayName": "${__field.labels._measurement} · nodo ${__field.labels.nodo}",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        }
+      },
+      "description": "Si sube a rojo, el nodo dejó de enviar datos."
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Paquetes perdidos",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-gemelo"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._field == \"perdidos\" and r.grupo =~ /^${grupo:regex}$/)\n  |> last()\n  |> keep(columns: [\"_value\", \"_measurement\", \"nodo\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          },
+          "mappings": [],
+          "displayName": "${__field.labels._measurement} · nodo ${__field.labels.nodo}",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false,
+          "fields": ""
+        }
+      },
+      "description": "Acumulado desde que arrancó el gateway."
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Concentración de CO₂",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-gemelo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"co2\" and r._field == \"co2_ppm\" and r.grupo =~ /^${grupo:regex}$/)\n  |> filter(fn: (r) => r._value > 0)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\", \"nodo\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ppm",
+          "decimals": 0,
+          "displayName": "Nodo ${__field.labels.nodo}",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1000
+              },
+              {
+                "color": "red",
+                "value": 1500
+              }
+            ]
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Nivel sonoro",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-gemelo"
+      },
+      "description": "Leq: promedio energético. Lmax: máximo de bloques de 32 ms. Fondo: ruido base estimado.",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "import \"math\"\nfrom(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"audio\" and r._field == \"leq_db\" and r.grupo =~ /^${grupo:regex}$/)\n  |> map(fn: (r) => ({r with _value: math.pow(x: 10.0, y: r._value / 10.0)}))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> map(fn: (r) => ({r with _value: 10.0 * math.log10(x: r._value)}))\n  |> keep(columns: [\"_time\", \"_value\", \"nodo\"])"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"audio\" and r._field == \"lmax_db\" and r.grupo =~ /^${grupo:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: max, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\", \"nodo\"])"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"audio\" and r._field == \"base_db\" and r.grupo =~ /^${grupo:regex}$/)\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)\n  |> keep(columns: [\"_time\", \"_value\", \"nodo\"])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dB",
+          "decimals": 1,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 65
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "A"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Leq · nodo ${__field.labels.nodo}"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Lmax · nodo ${__field.labels.nodo}"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "C"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Fondo · nodo ${__field.labels.nodo}"
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "gray"
+                }
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Registro de anomalías",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "influxdb-gemelo"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._field == \"anomalias\" and r._value != \"NINGUNA\" and r.grupo =~ /^${grupo:regex}$/)\n  |> keep(columns: [\"_time\", \"_measurement\", \"nodo\", \"_value\"])\n  |> group()\n  |> sort(columns: [\"_time\"], desc: true)\n  |> limit(n: 200)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "_time": 0,
+              "_measurement": 1,
+              "nodo": 2,
+              "_value": 3
+            },
+            "renameByName": {
+              "_time": "Hora",
+              "_measurement": "Sensor",
+              "nodo": "Nodo",
+              "_value": "Anomalía"
+            }
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Exportar datos crudos (abrir solo para descargar)",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "id": 10,
+          "type": "table",
+          "title": "CO₂ — datos crudos",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "description": "Datos sin promediar. Menú del panel → Inspect → Data → Download CSV.",
+          "gridPos": {
+            "x": 0,
+            "y": 25,
+            "w": 12,
+            "h": 10
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "influxdb",
+                "uid": "influxdb-gemelo"
+              },
+              "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"co2\" and r.grupo =~ /^${grupo:regex}$/)\n  |> drop(columns: [\"_start\", \"_stop\", \"topic\", \"mac\", \"_measurement\"])\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()\n  |> sort(columns: [\"_time\"])"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "Audio — datos crudos",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "influxdb-gemelo"
+          },
+          "description": "Datos sin promediar. Menú del panel → Inspect → Data → Download CSV.",
+          "gridPos": {
+            "x": 12,
+            "y": 25,
+            "w": 12,
+            "h": 10
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "influxdb",
+                "uid": "influxdb-gemelo"
+              },
+              "query": "from(bucket: \"gemelo\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"audio\" and r.grupo =~ /^${grupo:regex}$/)\n  |> drop(columns: [\"_start\", \"_stop\", \"topic\", \"mac\", \"_measurement\"])\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> group()\n  |> sort(columns: [\"_time\"])"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "align": "auto"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "showHeader": true,
+            "cellHeight": "sm",
+            "footer": {
+              "show": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

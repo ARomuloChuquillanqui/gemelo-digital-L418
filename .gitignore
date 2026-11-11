@@ -1,0 +1,25 @@
+# ---------- Secretos: NUNCA subir ----------
+.env
+**/.env
+*.pem
+*.key
+*.crt
+**/ca/
+**/mosquitto/certs/
+**/mosquitto/config/passwd
+
+# ---------- Compilación de Arduino ----------
+build/
+*.bin
+*.elf
+*.hex
+
+# ---------- Sistema operativo ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- Python (si se incluye el backend del gemelo 2D) ----------
+__pycache__/
+.venv/
+*.pyc

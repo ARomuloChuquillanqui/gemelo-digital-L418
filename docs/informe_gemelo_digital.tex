@@ -1,0 +1,1328 @@
+% =====================================================================
+% Informe: Implementación de la arquitectura IoT del Gemelo Digital L418
+% Compilar en Overleaf con pdfLaTeX
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-noshorthands,es-tabla]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,tabularx,longtable,array}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[most]{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+
+% ---------- Estilos ----------
+\definecolor{fondocod}{gray}{0.96}
+\definecolor{azul}{RGB}{31,78,121}
+\definecolor{naranja}{RGB}{200,100,20}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{fondocod},
+  frame=single, rulecolor=\color{gray!50},
+  breaklines=true, breakatwhitespace=false,
+  columns=fullflexible, keepspaces=true,
+  showstringspaces=false, tabsize=2,
+  xleftmargin=4pt, xrightmargin=4pt,
+  commentstyle=\color{gray}\itshape,
+  keywordstyle=\color{azul}\bfseries
+}
+\lstdefinestyle{bash}{language=bash}
+\lstdefinestyle{cpp}{language=C++}
+\lstdefinestyle{plano}{language={}}
+
+\newtcolorbox{completar}{
+  colback=naranja!6, colframe=naranja!80!black,
+  fonttitle=\bfseries, title=Completar antes de usar,
+  left=6pt, right=6pt, top=4pt, bottom=4pt
+}
+\newtcolorbox{nota}[1][Nota]{
+  colback=azul!5, colframe=azul!70!black,
+  fonttitle=\bfseries, title=#1,
+  left=6pt, right=6pt, top=4pt, bottom=4pt
+}
+
+\newcommand{\arch}[1]{\texttt{#1}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Gemelo Digital -- Sal\'on L418}
+\fancyhead[R]{\small UTEC}
+\fancyfoot[C]{\thepage}
+
+\setlength{\parskip}{4pt}
+\setlength{\emergencystretch}{3em}   % evita líneas desbordadas con nombres de variables largos
+\setlist{itemsep=2pt, topsep=3pt}
+
+% =====================================================================
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  {\large Universidad de Ingenier\'ia y Tecnolog\'ia -- UTEC\par}
+  \vspace{2.5cm}
+  {\Huge\bfseries Arquitectura IoT para el\\[4pt] Gemelo Digital del Sal\'on L418\par}
+  \vspace{0.8cm}
+  {\Large Implementaci\'on en servidor local y migraci\'on a la nube\par}
+  \vspace{2.5cm}
+  {\large \textbf{Integrantes:}\par}
+  \vspace{0.2cm}
+  {\large Abel Romulo Chuquillanqui Marav\'i\\ Sebastian Falvy Mendoza\\ Juan Diego Mej\'ia Armasa\\ Deyver Ricardo Fuertes Palpa\par}
+  \vspace{0.6cm}
+  {\large \textbf{Profesor:} Prof.\ Figueroa\par}
+  \vspace{0.3cm}
+  {\large \textbf{Curso:} PI3103 -- Proyectos Interdisciplinarios 3\par}
+  \vfill
+  {\large Lima, noviembre de 2026\par}
+\end{titlepage}
+
+\begin{abstract}
+Este informe documenta, paso a paso, la implementaci\'on de una arquitectura de
+Internet de las Cosas (IoT) que alimenta el gemelo digital del sal\'on L418. Siete nodos
+basados en ESP32 miden la concentraci\'on de CO$_2$ (MH-Z1911A), el nivel sonoro (INMP441),
+gases combustibles y humo (MQ-2), la iluminaci\'on (BH1750), la ocupaci\'on mediante una
+c\'amara t\'ermica (MLX90640), el estado de la puerta (KY-024) y la temperatura, humedad y
+presi\'on (BME280). Cada nodo procesa sus mediciones localmente, detecta anomal\'ias y
+transmite por ESP-NOW a un ESP32 central (gateway), que publica los datos por MQTT hacia un
+servidor con Mosquitto, Telegraf, InfluxDB y Grafana. Los datos se visualizan en tiempo real,
+se exportan a CSV para cualquier rango de tiempo y alimentan el gemelo digital 2D del
+sal\'on. El sistema se valid\'o de punta a punta con un servidor local, cada nodo se verific\'o
+en simulaci\'on, y se prepar\'o la versi\'on de producci\'on para la nube, con HTTPS, MQTT cifrado
+y acceso p\'ublico de solo lectura. Los archivos citados se encuentran en el repositorio
+indicado en los anexos.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% =====================================================================
+\section{Objetivo y alcance}
+
+El objetivo es que la informaci\'on de los sensores del sal\'on L418 llegue a un
+dashboard en tiempo real, accesible para la comunidad universitaria, desde el cual el
+usuario pueda exportar los datos del rango de tiempo que desee analizar. Esta
+infraestructura de datos es la base del gemelo digital.
+
+El alcance de este informe cubre:
+\begin{enumerate}
+  \item Los siete nodos sensores del sal\'on y su procesamiento en el borde.
+  \item El enlace inal\'ambrico ESP-NOW y el gateway ESP32.
+  \item El servidor local en una laptop (validaci\'on completa) y el dashboard final.
+  \item La migraci\'on a la nube (Azure for Students) y la versi\'on de producci\'on del servidor.
+  \item Los requisitos para alimentar el gemelo digital 2D del sal\'on.
+\end{enumerate}
+
+Los siete sensores pertenecen al sal\'on: hay una sola medici\'on de cada variable y todos
+los nodos se comunican con un \'unico gateway. Los datos son compartidos por todo el
+proyecto; cada integrante aporta desde su responsabilidad.
+
+\subsection{Equipo y responsabilidades}
+
+\begin{table}[H]
+\centering
+\caption{Responsabilidades del equipo.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Integrante} & \textbf{Responsabilidad} \\
+\midrule
+Abel R.\ Chuquillanqui Marav\'i & Integraci\'on de hardware (soldadura y conexionado de los sensores) y arquitectura IoT: nodos de CO$_2$ y ruido, comunicaci\'on ESP-NOW/MQTT, gateway, servidor y dashboard \\
+Sebastian Falvy Mendoza & Gemelo digital 2D (aplicaci\'on web Web-PI3) \\
+Juan Diego Mej\'ia Armasa & Gemelo digital 2D (aplicaci\'on web Web-PI3) \\
+Deyver R.\ Fuertes Palpa & Dise\~no de las carcasas de los m\'odulos y gesti\'on del proyecto (Asana) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% =====================================================================
+\section{Arquitectura general}
+
+La arquitectura se organiza en cuatro capas. Cada capa tiene una sola responsabilidad, lo
+que permite cambiar una (por ejemplo, el servidor) sin modificar las dem\'as.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  caja/.style={draw, rounded corners=3pt, align=center, minimum height=1.0cm,
+               minimum width=3.0cm, fill=#1},
+  caja/.default=white,
+  flecha/.style={-{Stealth[length=2.2mm]}, thick, gray!70!black},
+  etiq/.style={font=\scriptsize\itshape, fill=white, inner sep=1pt}
+]
+  % Capa 1: sensores
+  \node[caja=teal!12] (co2)   {Nodos 1, 2 y 3\\CO$_2$, ruido, gas};
+  \node[caja=teal!12, right=0.6cm of co2] (aud) {Nodos 4 y 7\\luz, ambiente};
+  \node[caja=teal!12, right=0.6cm of aud] (otr) {Nodos 5 y 6\\personas, puerta};
+
+  % Capa 2: gateway
+  \node[caja=orange!15, below=1.3cm of aud, minimum width=4.2cm] (gw)
+       {Gateway ESP32 v4\\ESP-NOW $\rightarrow$ WiFi};
+
+  \draw[flecha] (co2.south) |- ($(gw.north)+(-1.2,0.55)$) -- ($(gw.north)+(-1.2,0)$);
+  \draw[flecha] (aud.south) -- (gw.north);
+  \draw[flecha] (otr.south) |- ($(gw.north)+(1.2,0.55)$) -- ($(gw.north)+(1.2,0)$);
+  \node[etiq] at ($(aud.south)!0.45!(gw.north)+(1.05,0)$) {ESP-NOW};
+
+  % Capa 3: servidor
+  \node[caja=violet!10, below=1.6cm of gw, xshift=-4.35cm, minimum width=2.4cm] (mq)
+       {Mosquitto\\broker MQTT};
+  \node[caja=violet!10, right=0.5cm of mq, minimum width=2.4cm] (tg) {Telegraf\\traductor};
+  \node[caja=violet!10, right=0.5cm of tg, minimum width=2.4cm] (ix) {InfluxDB\\series de tiempo};
+  \node[caja=violet!10, right=0.5cm of ix, minimum width=2.4cm] (gf) {Grafana\\dashboard};
+  \draw[flecha] (mq) -- (tg);
+  \draw[flecha] (tg) -- (ix);
+  \draw[flecha] (ix) -- (gf);
+
+  \begin{scope}[on background layer]
+    \node[draw, dashed, rounded corners=5pt, inner sep=8pt, fit=(mq)(tg)(ix)(gf),
+          label={[font=\scriptsize\itshape]above right:Servidor (laptop o nube) -- Docker}] (srv) {};
+  \end{scope}
+
+  \draw[flecha] (gw.south) |- ($(mq.north)+(0,0.75)$) -- (mq.north);
+  \node[etiq] at ($(gw.south)+(0,-0.45)$) {MQTT por WiFi};
+
+  % Capa 4: usuarios
+  \node[caja=gray!12, below=1.0cm of srv] (csv) {Exportar CSV\\rango de tiempo};
+  \node[caja=gray!12, left=0.5cm of csv] (dash) {Dashboard p\'ublico\\(navegador)};
+  \node[caja=gray!12, right=0.5cm of csv] (gem) {Gemelo digital 2D\\(Web-PI3)};
+  \draw[flecha] (srv.south) -- ++(0,-0.45) -| (dash.north);
+  \draw[flecha] (srv.south) -- (csv.north);
+  \draw[flecha] (srv.south) -- ++(0,-0.45) -| (gem.north);
+\end{tikzpicture}
+\caption{Arquitectura por capas del sistema.}
+\label{fig:arquitectura}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Funci\'on de cada capa.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Capa} & \textbf{Funci\'on} \\
+\midrule
+Nodos sensores & Cada ESP32 lee su sensor, calcula indicadores y detecta anomal\'ias. Env\'ia solo
+indicadores, nunca datos crudos (por ejemplo, el nodo de audio no transmite el sonido). \\
+Enlace ESP-NOW & Protocolo inal\'ambrico directo entre ESP32. No requiere router ni red WiFi. \\
+Gateway & \'Unico dispositivo conectado a WiFi. Asigna la hora real (NTP), convierte los
+paquetes a JSON y los publica por MQTT. \\
+Servidor & Mosquitto recibe los mensajes MQTT, Telegraf los traduce, InfluxDB los almacena
+como series de tiempo y Grafana los muestra y permite exportarlos. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Nodos del sal\'on L418.}
+\small
+\begin{tabularx}{\textwidth}{@{}clllX@{}}
+\toprule
+\textbf{Nodo} & \textbf{Sensor} & \textbf{Interfaz} & \textbf{Env\'io} & \textbf{Ubicaci\'on} \\
+\midrule
+1 & MH-Z1911A (CO$_2$) & UART & 5 s & Techo, centro \\
+2 & INMP441 (ruido) & I$^2$S & 1 s & Techo, centro \\
+3 & MQ-2 (gas y humo) & Anal\'ogica & 2 s & Techo, separado de los dem\'as \\
+4 & BH1750 (iluminaci\'on) & I$^2$C & 10 s + evento & Techo, centro \\
+5 & MLX90640 (personas) & I$^2$C & 5 s + evento & Marco superior de la puerta (2.3 m) \\
+6 & KY-024 (puerta) & Anal\'ogica & 10 s + evento & Marco de la puerta, im\'an en la hoja \\
+7 & BME280 (T, HR, P) & I$^2$C & 10 s & Techo, centro \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Decisiones de dise\~no}
+
+\begin{itemize}
+  \item \textbf{ESP32 como gateway y no como dashboard.} Un ESP32 tiene unos 520~KB de RAM:
+        no puede almacenar semanas de datos de varios sensores ni atender a muchos usuarios.
+        Por eso reenv\'ia los datos y el dashboard vive en un servidor.
+  \item \textbf{MQTT en lugar de archivos CSV.} El CSV es un formato de exportaci\'on, no de
+        transporte. Enviar archivos impide el tiempo real y obliga a fusionarlos a mano. Con
+        MQTT los datos fluyen continuamente y el CSV se genera al final, para el rango que
+        elija el usuario.
+  \item \textbf{ESP-NOW en lugar de Bluetooth.} El ESP32 tiene una sola radio compartida
+        entre WiFi y Bluetooth. ESP-NOW usa la misma radio que WiFi, tiene mayor alcance y
+        es m\'as simple para varios emisores hacia un receptor.
+  \item \textbf{Un solo gateway para el sal\'on.} Los siete nodos usan ESP-NOW hacia el
+        mismo gateway. As\'i, TI solo debe autorizar un dispositivo en la red WiFi y
+        existe un \'unico usuario MQTT.
+  \item \textbf{Procesamiento en el borde.} Enviar audio crudo requerir\'ia
+  \begin{equation}
+    16\,000~\tfrac{\text{muestras}}{\text{s}} \times 16~\tfrac{\text{bits}}{\text{muestra}}
+    = 256~\text{kbps},
+  \end{equation}
+  inviable para un enlace inal\'ambrico de bajo consumo. El nodo env\'ia en cambio un
+  paquete de 38~bytes por segundo.
+\end{itemize}
+
+% =====================================================================
+\section{Materiales y herramientas}
+
+\begin{table}[H]
+\centering
+\caption{Hardware utilizado.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Componente} & \textbf{Uso} \\
+\midrule
+ESP32 DevKit V1 + MH-Z1911A & Nodo 1: CO$_2$ (UART) \\
+ESP32 DevKit V1 + INMP441 & Nodo 2: nivel sonoro (I$^2$S) \\
+ESP32 DevKit V1 + MQ-2 & Nodo 3: gases combustibles y humo (anal\'ogico, 5 V) \\
+ESP32 DevKit V1 + GY-302 BH1750 & Nodo 4: iluminaci\'on (I$^2$C) \\
+ESP32 DevKit V1 + MLX90640 (55$^\circ$) & Nodo 5: conteo de personas (I$^2$C) \\
+ESP32 DevKit V1 + KY-024 + im\'an & Nodo 6: estado de la puerta (anal\'ogico) \\
+ESP32 DevKit V1 + GY-BME280 & Nodo 7: temperatura, humedad y presi\'on (I$^2$C) \\
+ESP32 DevKit V4 & Gateway (nodo central) \\
+Resistencias 10 k$\Omega$ y 15 k$\Omega$ (2 de cada una) & Divisores de tensi\'on del MQ-2 \\
+Laptop con Windows 11 & Servidor local y programaci\'on \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Software utilizado.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Software} & \textbf{Uso} \\
+\midrule
+Arduino IDE + n\'ucleo ESP32 & Programaci\'on de los tres ESP32 \\
+Librer\'ia PubSubClient (Nick O'Leary) & Cliente MQTT en el gateway \\
+Librer\'ias Adafruit MLX90640, Adafruit BME280 y BH1750 (C.\ Laws) & Lectura de los sensores I$^2$C \\
+Docker Desktop + WSL~2 & Ejecuci\'on de los servicios del servidor \\
+\texttt{eclipse-mosquitto:2} & Broker MQTT \\
+\texttt{telegraf:1.32} & Ingesta MQTT $\rightarrow$ InfluxDB \\
+\texttt{influxdb:2.7} & Base de datos de series de tiempo \\
+\texttt{grafana/grafana:11.3.0} & Dashboard y exportaci\'on CSV \\
+\texttt{caddy:2.8} & Proxy HTTPS (solo en la nube) \\
+Microsoft Azure for Students & M\'aquina virtual en la nube \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% =====================================================================
+\section{Fase 1: Nodos sensores}
+
+\subsection{Formato com\'un de datos}
+
+Los tres ESP32 comparten el archivo \arch{paquetes.h}, que define la estructura binaria de
+cada paquete. Se eligi\'o un formato binario porque ESP-NOW admite como m\'aximo 250~bytes
+por paquete y porque el gateway no necesita interpretar texto. Las anomal\'ias viajan como
+bits dentro de un byte.
+
+\begin{completar}
+\arch{paquetes.h}: no se modifica. Debe ser \textbf{id\'entico} en las carpetas de los siete
+nodos, \arch{gateway} y \arch{gateway\_nube}. Si se cambia, hay que actualizar todas las copias y
+volver a programar al menos el gateway y los nodos cuya estructura cambi\'o.
+\end{completar}
+
+\begin{table}[H]
+\centering
+\caption{Cabecera com\'un de todos los paquetes (11~bytes).}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Campo} & \textbf{Tipo} & \textbf{Descripci\'on} \\
+\midrule
+\texttt{version} & \texttt{uint8} & Versi\'on del protocolo (1) \\
+\texttt{tipo} & \texttt{uint8} & 1 = CO$_2$, 2 = audio \\
+\texttt{nodo\_id} & \texttt{uint8} & Identificador \'unico del nodo \\
+\texttt{seq} & \texttt{uint32} & Contador para detectar paquetes perdidos \\
+\texttt{uptime\_ms} & \texttt{uint32} & Tiempo desde el encendido del nodo \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Tipos de paquete y anomal\'ias (bit 0, 1, 2, 3).}
+\small
+\begin{tabularx}{\textwidth}{@{}clX@{}}
+\toprule
+\textbf{Tipo} & \textbf{Nombre} & \textbf{Anomal\'ias por bit} \\
+\midrule
+1 & \texttt{co2} & \texttt{FALLO\_SENSOR}, \texttt{CO2\_PICO\_RAPIDO}, \texttt{CO2\_ALERTA\_VENTILACION}, \texttt{CO2\_CRITICO} \\
+2 & \texttt{audio} & \texttt{FALLO\_AUDIO}, \texttt{RUIDO\_IMPACTO}, \texttt{RUIDO\_FUERTE\_SOSTENIDO}, \texttt{RUIDO\_MECANICO\_CONSTANTE} \\
+3 & \texttt{gas} & \texttt{FALLO\_SENSOR}, \texttt{GAS\_DETECTADO}, \texttt{GAS\_CRITICO} \\
+4 & \texttt{luz} & \texttt{FALLO\_SENSOR}, \texttt{ILUMINACION\_BAJA} \\
+5 & \texttt{termico} & \texttt{FALLO\_SENSOR}, \texttt{CONTEO\_CORREGIDO}, \texttt{OBJETO\_ESTATICO} \\
+6 & \texttt{magnetico} & \texttt{FALLO\_SENSOR}, \texttt{PUERTA\_ABIERTA\_PROLONGADA} \\
+7 & \texttt{ambiente} & \texttt{FALLO\_SENSOR}, \texttt{TEMP\_FUERA\_CONFORT}, \texttt{HUMEDAD\_ALTA}, \texttt{CAMBIO\_RAPIDO\_TEMP} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Nodo de CO$_2$ (MH-Z1911A)}
+
+\textbf{Conexi\'on.} El sensor se comunica por UART2 a 9600~baudios: TX del sensor al
+GPIO~16 (RX2) y RX del sensor al GPIO~17 (TX2).
+
+\textbf{Funcionamiento.} Cada 5~s el nodo env\'ia el comando de lectura \texttt{0x86},
+valida el encabezado y el checksum de la respuesta, y obtiene la concentraci\'on y la
+temperatura interna aproximada:
+\begin{equation}
+  C_{\text{CO}_2} = 256\,r_2 + r_3 \quad [\text{ppm}],
+  \qquad T \approx r_4 - 40 \quad [^\circ\text{C}].
+\end{equation}
+El periodo de 5~s es adecuado porque el sensor responde en 1 a 2~minutos ($T_{90}$).
+Durante los primeros 3~minutos (calentamiento) no se eval\'uan anomal\'ias.
+
+\textbf{Niveles y anomal\'ias.} Los umbrales son 1000~ppm (alerta de ventilaci\'on) y
+1500~ppm (cr\'itico), con hist\'eresis de 100~ppm y confirmaci\'on de 3 lecturas
+consecutivas para evitar oscilaciones. Adem\'as se calcula la variaci\'on en 30~s
+($6 \times 5\,\text{s}$) para detectar subidas r\'apidas mayores a 300~ppm.
+
+\textbf{Archivos:} \arch{nodo\_co2.ino}, \arch{paquetes.h}, \arch{espnow\_nodo.h}
+(los tres en la carpeta \arch{nodo\_co2}).
+
+\begin{completar}
+En \arch{nodo\_co2.ino}:
+\begin{itemize}
+  \item \texttt{MAC\_GATEWAY}: MAC del ESP32 v4. En este proyecto:\\
+        \texttt{\{0x58, 0x2A, 0xBD, 0x72, 0x03, 0xDC\}} (ver secci\'on~\ref{sec:mac}).
+  \item \texttt{SSID\_ROUTER}: nombre exacto de la red WiFi a la que se conecta el gateway.
+        Solo se usa para encontrar el canal; el nodo no se conecta a esa red.
+  \item \texttt{NODO\_ID}: \texttt{1}. Debe ser \'unico en todo el proyecto.
+\end{itemize}
+\end{completar}
+
+\subsection{Nodo de audio (INMP441)}
+
+\textbf{Conexi\'on I$^2$S.} SCK al GPIO~26, WS al GPIO~25, SD al GPIO~33; L/R a GND (canal
+izquierdo).
+
+\textbf{Procesamiento.} El nodo muestrea a $f_s = 16$~kHz en bloques de $N = 512$ muestras
+(32~ms). Para cada bloque calcula el valor RMS y el pico; cada segundo agrega los bloques y
+env\'ia los indicadores. El nivel equivalente se calcula como promedio de energ\'ia, no
+de decibeles:
+\begin{equation}
+  L_{eq,T} = 10\log_{10}\!\left(\frac{1}{n}\sum_{i=1}^{n} 10^{L_i/10}\right).
+\end{equation}
+Por ejemplo, el promedio de 60~dB y 80~dB es aproximadamente 77~dB y no 70~dB, porque el
+sonido fuerte domina la energ\'ia.
+
+\textbf{Conversi\'on a dB SPL.} El micr\'ofono entrega niveles en dBFS (relativos al fondo de
+escala digital). Con la sensibilidad del INMP441 ($-26$~dBFS a 94~dB SPL):
+\begin{equation}
+  L_{\text{SPL}} \approx L_{\text{dBFS}} - (-26) + 94 = L_{\text{dBFS}} + 120.
+\end{equation}
+
+\textbf{An\'alisis espectral.} Sobre el bloque m\'as fuerte de cada segundo se aplica una
+ventana de Hann y una FFT de 512 puntos, con resoluci\'on
+\begin{equation}
+  \Delta f = \frac{f_s}{N} = \frac{16\,000}{512} = 31.25~\text{Hz}.
+\end{equation}
+Se obtiene la frecuencia dominante y un \'indice de tonalidad (energ\'ia concentrada en el
+pico); un tono persistente durante 30~s se reporta como ruido mec\'anico constante.
+
+\begin{table}[H]
+\centering
+\caption{Indicadores enviados por el nodo de audio cada segundo.}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Campo} & \textbf{Significado} \\
+\midrule
+\texttt{leq\_db} & Nivel equivalente del segundo (dB SPL estimado) \\
+\texttt{lmax\_db} & M\'aximo RMS de bloques de 32~ms \\
+\texttt{pico\_db} & Pico de muestra \\
+\texttt{base\_db} & Ruido de fondo estimado \\
+\texttt{freq\_dom\_hz} & Frecuencia dominante \\
+\texttt{tonal} & \'Indice de tonalidad (0 a 1) \\
+\texttt{bloques\_fuertes} & Bloques sobre el umbral en el segundo \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Archivos:} \arch{nodo\_audio.ino}, \arch{paquetes.h}, \arch{espnow\_nodo.h}
+(carpeta \arch{nodo\_audio}).
+
+\begin{completar}
+En \arch{nodo\_audio.ino}:
+\begin{itemize}
+  \item \texttt{MAC\_GATEWAY}: la misma MAC del gateway.
+  \item \texttt{SSID\_ROUTER}: el mismo nombre de red que en el nodo de CO$_2$.
+  \item \texttt{NODO\_ID}: \texttt{2}.
+  \item \texttt{OFFSET\_SPL\_DB}: valor inicial 120. Ajustarlo comparando con un son\'ometro:
+        si el nodo marca $L_{\text{nodo}}$ y el son\'ometro $L_{\text{ref}}$, el nuevo valor es
+        $120 - (L_{\text{nodo}} - L_{\text{ref}})$.
+\end{itemize}
+\end{completar}
+
+
+\subsection{Nodo de gas y humo (MQ-2)}
+
+\textbf{Conexi\'on.} El MQ-2 se alimenta a 5~V desde el pin VIN del ESP32, porque su calefactor
+(33~$\Omega$, consumo menor a 800~mW) necesita ese voltaje para alcanzar la temperatura de
+trabajo. Sus salidas AO y DO pueden llegar a 5~V, por lo que cada una pasa por un divisor
+($R_1 = 10$~k$\Omega$, $R_2 = 15$~k$\Omega$) antes de entrar al ESP32: AO al GPIO~35 y DO al
+GPIO~32, ambos del ADC1.
+\begin{equation}
+  V_{\text{ESP32}} = V_{\text{m\'odulo}}\,\frac{R_2}{R_1 + R_2} = 5~\text{V}\cdot\frac{15}{25} = 3.0~\text{V}.
+\end{equation}
+
+\textbf{Funcionamiento.} El MQ-2 es un sensor semiconductor de SnO$_2$ cuya resistencia baja
+ante gases reductores (GLP, humo, alcohol, metano, hidr\'ogeno), sin distinguirlos. A partir
+del voltaje de salida se calcula su resistencia y se compara con su valor en aire limpio,
+$R_0$, calibrado tras el precalentamiento y guardado en la memoria flash:
+\begin{equation}
+  R_s = R_L\,\frac{V_C - V_{\text{out}}}{V_{\text{out}}},
+  \qquad
+  \text{rs\_r0} = \frac{R_s}{R_0}.
+\end{equation}
+Adem\'as se reporta una estimaci\'on referencial de GLP equivalente con la curva del datasheet,
+considerando que el fabricante define su $R_0$ con $R_s/R_0 = 9.83$ en aire limpio:
+\begin{equation}
+  C_{\text{GLP}} \approx 613.9\,\big(9.83\cdot\text{rs\_r0}\big)^{-2.074}~\text{ppm}.
+\end{equation}
+
+\textbf{Niveles.} ALERTA con \texttt{rs\_r0} $< 0.60$ (sale con $> 0.70$) y CR\'ITICO con
+\texttt{rs\_r0} $< 0.17$ (sale con $> 0.20$), cada cambio confirmado con 3 lecturas seguidas.
+El nivel cr\'itico corresponde aproximadamente a 200~ppm de GLP, el inicio del rango del datasheet.
+
+\textbf{Variables:} \texttt{v\_ao}, \texttt{rs\_r0}, \texttt{ppm\_glp\_est}, \texttt{nivel},
+\texttt{do\_alarma}, \texttt{calentando}. \textbf{Archivo:} \arch{nodo\_gas.ino}.
+
+\begin{completar}
+En \arch{nodo\_gas.ino}: \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER}, \texttt{NODO\_ID = 3};
+\texttt{R\_L} (resistencia de carga del m\'odulo: ``203'' = 20~k$\Omega$, ``102'' = 1~k$\Omega$) y
+\texttt{V\_C} (voltaje real del m\'odulo medido con mult\'imetro). Tras 24~h de precalentamiento,
+escribir \texttt{CAL} en el Monitor Serie con el sal\'on ventilado.
+\end{completar}
+
+\subsection{Nodo de iluminaci\'on (BH1750)}
+
+\textbf{Conexi\'on.} I$^2$C (SDA al GPIO~21, SCL al GPIO~22), alimentaci\'on a 3.3~V,
+direcci\'on 0x23.
+
+\textbf{Funcionamiento.} El BH1750 entrega directamente la iluminancia en lux (1 a 65\,535~lx).
+El nodo lee una vez por segundo y env\'ia cada 10~s el promedio, el m\'inimo y el m\'aximo de la
+ventana. Como el sensor est\'a en el techo, la iluminancia sobre las mesas se estima con un
+factor medido con un lux\'ometro:
+\begin{equation}
+  E_{\text{mesa}} \approx k\,\bar{E}_{\text{techo}}, \qquad k = 0.482.
+\end{equation}
+Para detectar el encendido o apagado de las luces se compara el promedio de los \'ultimos 3~s con
+el de los 3~s anteriores: el cambio debe superar 50~lx y el 30\,\% del nivel mayor, y ambos bloques
+deben ser estables. As\'i se distingue un cambio de luces (inmediato) de una nube (gradual).
+
+\textbf{Variables:} \texttt{lux}, \texttt{lux\_min}, \texttt{lux\_max}, \texttt{lux\_mesa\_est},
+\texttt{luces\_cambio}. \textbf{Anomal\'ia} \texttt{ILUMINACION\_BAJA}: $E_{\text{mesa}} < 300$~lx
+(se apaga sobre 330~lx). \textbf{Archivo:} \arch{nodo\_luz.ino}.
+
+\begin{completar}
+En \arch{nodo\_luz.ino}: \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER}, \texttt{NODO\_ID = 4} y
+\texttt{FACTOR\_MESA}. El factor solo es v\'alido para la posici\'on y orientaci\'on en que se midi\'o.
+\end{completar}
+
+\subsection{Nodo de conteo de personas (MLX90640)}
+
+\textbf{Conexi\'on.} I$^2$C a 1~MHz (SDA al GPIO~21, SCL al GPIO~22), alimentaci\'on a 3.3~V.
+El sensor se instala en el marco superior de la puerta, a 2.3~m, mirando hacia abajo.
+
+\textbf{Geometr\'ia.} Con la cabeza a unos 0.6~m del sensor, el \'area vista a esa altura es
+\begin{equation}
+  L = 2\,d\,\tan\!\left(\frac{\theta}{2}\right):\quad
+  L_{55^\circ} \approx 0.62~\text{m},\quad L_{35^\circ} \approx 0.38~\text{m},
+\end{equation}
+de modo que cada p\'ixel mide unos 2~cm y una cabeza ocupa alrededor de $9 \times 11$ p\'ixeles.
+El eje de 55$^\circ$ se orienta en el sentido de la marcha para ver a cada persona en unos 4 cuadros.
+
+\textbf{Algoritmo.} En cada cuadro de $32\times24$ p\'ixeles: (1) se resta un modelo del fondo
+aprendido con la puerta despejada; (2) se marcan los p\'ixeles que superan el fondo en
+$\max(1.5~^\circ\text{C},\,4\sigma)$; (3) se agrupan en regiones; (4) cada m\'aximo local de
+temperatura se interpreta como una cabeza, lo que permite separar dos personas que pasan juntas;
+(5) se sigue cada cabeza entre cuadros y se cuenta un cruce cuando su trayectoria atraviesa dos
+l\'ineas virtuales. La ocupaci\'on se acumula como
+\begin{equation}
+  N(t) = \max\big(0,\; N(t^-) + E - S\big).
+\end{equation}
+
+\textbf{Variables:} \texttt{entradas}, \texttt{salidas}, \texttt{ocupacion\_est},
+\texttt{personas\_en\_vista}, \texttt{cruces\_dudosos}, \texttt{t\_fondo}, \texttt{t\_max}.
+\textbf{Archivo:} \arch{nodo\_termico.ino}.
+
+\begin{completar}
+En \arch{nodo\_termico.ino}: \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER}, \texttt{NODO\_ID = 5}.
+Con \texttt{DEBUG\_MAPA 1} verificar que la cabeza cruce las l\'ineas de izquierda a derecha y
+ajustar \texttt{SENTIDO\_ENTRADA}. Al encender, la puerta debe quedar despejada unos 3~s.
+\end{completar}
+
+\subsection{Nodo de la puerta (KY-024)}
+
+\textbf{Conexi\'on.} Salida anal\'ogica AO al GPIO~34 (ADC1), alimentaci\'on a 3.3~V. El sensor
+va en el marco y el im\'an en la hoja de la puerta. Opcionalmente, una resistencia de 100~k$\Omega$
+entre AO y 3.3~V permite detectar un cable suelto.
+
+\textbf{Funcionamiento.} La salida del KY-024 es invertida: con el im\'an cerca (puerta cerrada)
+la lectura es baja. El estado se decide con hist\'eresis (cerrada bajo 1200, abierta sobre 1800,
+y entre ambos se mantiene el estado anterior) y un antirrebote de 150~ms. El nodo lee 20 veces por
+segundo y env\'ia cada 10~s, y de inmediato cuando la puerta cambia de estado.
+
+\textbf{Variables:} \texttt{puerta\_abierta}, \texttt{aperturas}, \texttt{seg\_abierta},
+\texttt{campo\_raw}. \textbf{Anomal\'ia} \texttt{PUERTA\_ABIERTA\_PROLONGADA}: m\'as de 10~min.
+\textbf{Archivo:} \arch{nodo\_magnetico.ino}.
+
+\begin{completar}
+En \arch{nodo\_magnetico.ino}: \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER}, \texttt{NODO\_ID = 6}.
+Con \texttt{DEBUG\_RAW 1} comprobar que la lectura cerrada quede claramente bajo
+\texttt{UMBRAL\_CERRADA} y la abierta sobre \texttt{UMBRAL\_ABIERTA}.
+\end{completar}
+
+\subsection{Nodo de ambiente (BME280)}
+
+\textbf{Conexi\'on.} I$^2$C (SDA al GPIO~21, SCL al GPIO~22), alimentaci\'on a 3.3~V, direcci\'on
+0x76 (SDO a GND). Debe separarse del ESP32 y, sobre todo, del calefactor del MQ-2.
+
+\textbf{Funcionamiento.} El sensor mide en modo forzado cada 10~s (solo cuando se le pide), lo
+que minimiza su autocalentamiento. Las anomal\'ias usan hist\'eresis: confort entre 20 y 26~$^\circ$C
+(se apaga 0.5~$^\circ$C dentro del rango), humedad alta sobre 70\,\% (se apaga bajo 65\,\%) y cambio
+r\'apido si la temperatura var\'ia m\'as de 1.5~$^\circ$C respecto a hace 5~min.
+
+\textbf{Variables:} \texttt{temp\_c}, \texttt{hum\_pct}, \texttt{pres\_hpa}.
+\textbf{Archivo:} \arch{nodo\_ambiente.ino}.
+
+\begin{completar}
+En \arch{nodo\_ambiente.ino}: \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER}, \texttt{NODO\_ID = 7}.
+En Lima la humedad relativa suele estar entre 70 y 85\,\%: tras unos d\'ias de datos conviene
+ajustar \texttt{HUM\_ALTA}. Si el monitor indica BMP280, el m\'odulo no mide humedad.
+\end{completar}
+
+% =====================================================================
+\section{Fase 2: Enlace ESP-NOW y gateway}
+
+\subsection{Obtenci\'on de la MAC del gateway}
+\label{sec:mac}
+
+Los nodos necesitan la direcci\'on MAC del gateway para enviarle paquetes. Hay dos formas de
+obtenerla:
+\begin{enumerate}
+  \item Subir cualquier programa al ESP32 v4: la consola de salida de Arduino IDE (no el
+        Monitor Serie) muestra la l\'inea \texttt{MAC: xx:xx:xx:xx:xx:xx}.
+  \item Subir el programa \arch{obtener\_mac.ino}, que la imprime cada 2~s en el Monitor
+        Serie (115\,200 baudios) con el formato listo para copiar.
+\end{enumerate}
+
+\begin{lstlisting}[style=cpp, caption={Contenido de \texttt{obtener\_mac.ino}.}]
+#include <WiFi.h>
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.mode(WIFI_STA);   // necesario para que la MAC no salga en ceros
+  delay(100);
+}
+
+void loop() {
+  uint8_t m[6];
+  WiFi.macAddress(m);
+  Serial.printf("MAC STA: %s\n", WiFi.macAddress().c_str());
+  Serial.printf("Para MAC_GATEWAY: {0x%02X, 0x%02X, 0x%02X, 0x%02X, 0x%02X, 0x%02X}\n\n",
+                m[0], m[1], m[2], m[3], m[4], m[5]);
+  delay(2000);
+}
+\end{lstlisting}
+
+La MAC obtenida fue \texttt{58:2A:BD:72:03:DC}. Es la MAC en modo estaci\'on (STA), que
+tambi\'en es la que ve el punto de acceso WiFi; por eso es la que se entrega a TI.
+
+\subsection{Sincronizaci\'on de canal}
+
+ESP-NOW solo funciona si emisor y receptor est\'an en el mismo canal. Al conectarse al WiFi,
+el gateway queda en el canal que elige el router. Por eso cada nodo, al arrancar, escanea la
+red indicada en \texttt{SSID\_ROUTER}, lee su canal y se sintoniza en \'el sin conectarse.
+Si fallan 10 env\'ios seguidos, vuelve a escanear por si el router cambi\'o de canal. Esta
+l\'ogica est\'a en \arch{espnow\_nodo.h}, que no requiere modificaciones.
+
+\begin{nota}[Orden de encendido]
+Encender primero el gateway y despu\'es los nodos, para que al escanear la red ya est\'e en su
+canal definitivo. La red debe ser de \textbf{2.4~GHz}: el ESP32 no detecta redes de 5~GHz.
+\end{nota}
+
+\subsection{C\'odigo del gateway}
+
+El gateway (\arch{gateway.ino} y \arch{paquetes.h}, carpeta \arch{gateway}) realiza:
+\begin{enumerate}
+  \item Conexi\'on al WiFi y sincronizaci\'on de la hora por NTP (UTC).
+  \item Recepci\'on ESP-NOW: el callback solo copia el paquete a una cola de FreeRTOS, porque
+        se ejecuta dentro de la tarea del WiFi y no debe bloquearse.
+  \item Procesamiento en el \texttt{loop()}: valida versi\'on, tipo y tama\~no; asigna la hora
+        real; cuenta paquetes perdidos por nodo a partir de \texttt{seq}.
+  \item Conversi\'on a JSON y publicaci\'on en el t\'opico
+        \texttt{utec/gemelo/<grupo>/nodo<id>/<tipo>}, con los siete tipos definidos
+        en \arch{paquetes.h}.
+\end{enumerate}
+
+Las anomal\'ias se env\'ian como texto (\texttt{"CO2\_ALERTA\_VENTILACION|..."}) y como
+n\'umero (\texttt{anom\_bits}), porque InfluxDB guarda textos y n\'umeros pero no listas.
+
+\begin{lstlisting}[style=plano, caption={Ejemplo de mensaje publicado por el gateway.}]
+utec/gemelo/grupo1/nodo1/co2
+{"nodo":1,"mac":"00:70:07:A1:E0:24","seq":1409,"ts":1793552417884,
+ "uptime_ms":7050021,"perdidos":0,"tipo":"co2","co2_ppm":571,
+ "delta_30s":0,"temp_c":32,"calentando":0,"nivel":"NORMAL",
+ "anomalias":"NINGUNA","anom_bits":0}
+\end{lstlisting}
+
+\begin{completar}
+En \arch{gateway.ino}:
+\begin{itemize}
+  \item \texttt{WIFI\_SSID} y \texttt{WIFI\_PASS}: red WiFi de 2.4~GHz. Debe ser la misma
+        red indicada en \texttt{SSID\_ROUTER} de ambos nodos.
+  \item \texttt{GRUPO}: identificador en los t\'opicos. Debe ser el mismo que usa el backend del
+        gemelo 2D y, en la nube, el usuario MQTT (\texttt{grupo1}).
+  \item \texttt{USAR\_MQTT}: \texttt{0} para validar solo el enlace (salida por Monitor
+        Serie); \texttt{1} para publicar en el servidor (Fase~3).
+  \item \texttt{MQTT\_HOST}: direcci\'on IPv4 de la laptop (Fase~3, paso~\ref{paso:ip}).
+\end{itemize}
+\end{completar}
+
+\subsection{Conexi\'on a la red de la universidad}
+
+La red \emph{UTEC Proyectos} usa seguridad WPA2-Personal (clave compartida) y es de doble banda.
+El ESP32 solo opera en 2.4~GHz, mientras que una laptop puede conectarse a la misma red en 5~GHz;
+ambas quedan en la misma subred. Si el gateway no conecta, el c\'odigo de estado de
+\texttt{WiFi.status()} orienta el diagn\'ostico: 1 indica que no encuentra la red (nombre mal
+escrito o sin cobertura de 2.4~GHz), 4 que la conexi\'on fue rechazada (clave o MAC no autorizada)
+y 6, casi siempre, una clave incorrecta. El ejemplo \emph{WiFiScan} de Arduino IDE confirma si la
+red es visible en 2.4~GHz. Si el gateway conecta pero no llega al servidor, la causa probable es el
+aislamiento de clientes de la red, que solo puede desactivar TI.
+
+\subsection{Validaci\'on del enlace}
+
+Con \texttt{USAR\_MQTT = 0}, el Monitor Serie del gateway mostr\'o los mensajes de ambos nodos:
+audio cada 1~s y CO$_2$ cada 5~s. El estado report\'o \texttt{WiFi=OK}, \texttt{canal=11},
+\texttt{NTP=OK} y \texttt{descartados=0}. El contador \texttt{perdidos} se mantuvo en 0 para
+el nodo de CO$_2$; el de audio registr\'o 4 p\'erdidas durante el arranque y luego se mantuvo
+estable.
+
+% =====================================================================
+\section{Fase 3: Servidor local en la laptop}
+
+\subsection{Instalaci\'on de Docker Desktop y WSL~2}
+
+\begin{enumerate}
+  \item Descargar Docker Desktop desde \url{https://www.docker.com}. En el instalador,
+        elegir \emph{Per-user installation} con backend \textbf{WSL~2} (no \emph{Docker VMM}).
+  \item Verificar en el Administrador de tareas $\rightarrow$ Rendimiento $\rightarrow$ CPU
+        que la virtualizaci\'on est\'e habilitada.
+  \item En PowerShell como administrador, instalar o actualizar WSL y reiniciar:
+\begin{lstlisting}[style=bash]
+wsl --install        # o:  wsl --update
+\end{lstlisting}
+  \item Comprobar la versi\'on (debe indicar \texttt{Default Version: 2}):
+\begin{lstlisting}[style=bash]
+wsl --status
+\end{lstlisting}
+  \item Abrir Docker Desktop y esperar el indicador verde \emph{Engine running}.
+  \item Prueba final:
+\begin{lstlisting}[style=bash]
+docker --version
+docker run hello-world
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{Estructura del servidor local}
+
+Los archivos se ubican en la carpeta \arch{servidor\_iot}:
+
+\begin{lstlisting}[style=plano]
+servidor_iot/
+|-- .env
+|-- docker-compose.yml
+|-- mosquitto/config/mosquitto.conf
+|-- telegraf/telegraf.conf
+|-- grafana/provisioning/datasources/influxdb.yml
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\caption{Archivos del servidor local.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Archivo} & \textbf{Funci\'on} \\
+\midrule
+\arch{docker-compose.yml} & Define los cuatro servicios y su red interna. Expone los puertos
+1883 (MQTT), 8086 (InfluxDB) y 3000 (Grafana). \\
+\arch{.env} & Contrase\~nas y token de InfluxDB. \\
+\arch{mosquitto.conf} & Habilita el listener 1883 con acceso an\'onimo (solo para pruebas
+locales). \\
+\arch{telegraf.conf} & Se suscribe a los siete tipos (\texttt{utec/gemelo/+/+/co2},
+\texttt{audio}, \texttt{gas}, \texttt{luz}, \texttt{termico}, \texttt{magnetico} y \texttt{ambiente}),
+interpreta el JSON y escribe en InfluxDB. \\
+\arch{influxdb.yml} & Crea autom\'aticamente la fuente de datos InfluxDB en Grafana. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+En \arch{telegraf.conf} se define el contrato con el gateway: \texttt{tipo} determina la
+tabla (\emph{measurement}) \texttt{co2} o \texttt{audio}; \texttt{nodo} y \texttt{mac} son
+etiquetas indexadas; \texttt{ts} es la marca de tiempo (hora del gateway, no la de
+llegada); y el grupo se extrae del t\'opico como etiqueta \texttt{grupo}. Los tipos se listan
+expl\'icitamente, en lugar de usar el comod\'in \texttt{\#}, porque el t\'opico de estado del gateway
+contiene texto plano (\texttt{online}/\texttt{offline}) y no JSON.
+
+\begin{completar}
+En \arch{servidor\_iot/.env}, antes del primer arranque:
+\begin{itemize}
+  \item \texttt{INFLUX\_PASSWORD} y \texttt{GRAFANA\_PASSWORD}: m\'inimo 8 caracteres, sin
+        espacios ni comillas.
+  \item \texttt{INFLUX\_TOKEN}: texto largo y aleatorio.
+\end{itemize}
+InfluxDB lee estos valores solo la primera vez. Si se cambian despu\'es, hay que borrar los
+vol\'umenes con \texttt{docker compose down -v} (se pierden los datos).
+\end{completar}
+
+\subsection{Levantar el servidor}
+
+En una terminal abierta dentro de \arch{servidor\_iot}:
+\begin{lstlisting}[style=bash]
+docker compose up -d
+docker compose ps
+\end{lstlisting}
+Los cuatro contenedores deben aparecer como \emph{Up}. InfluxDB queda en
+\url{http://localhost:8086} y Grafana en \url{http://localhost:3000} (usuario \texttt{admin}).
+
+\subsection{Conectar el gateway al servidor local}
+
+\begin{enumerate}
+  \item Conectar la laptop a la misma red WiFi que el gateway.
+  \item \label{paso:ip} Obtener la IPv4 de la laptop con \texttt{ipconfig}, en la secci\'on
+        \emph{Adaptador de LAN inal\'ambrica Wi-Fi}. No usar las direcciones de los
+        adaptadores \emph{vEthernet (WSL)} ni de Docker.
+  \item Cambiar el perfil de la red a \textbf{Privada} (Configuraci\'on $\rightarrow$ Red e
+        Internet $\rightarrow$ Wi-Fi $\rightarrow$ red $\rightarrow$ Tipo de perfil).
+  \item Abrir el puerto 1883 en el firewall (PowerShell como administrador):
+\begin{lstlisting}[style=bash]
+New-NetFirewallRule -DisplayName "MQTT 1883" -Direction Inbound -Protocol TCP -LocalPort 1883 -Action Allow
+\end{lstlisting}
+  \item Instalar la librer\'ia \emph{PubSubClient} de Nick O'Leary en Arduino IDE.
+  \item En \arch{gateway.ino}: \texttt{USAR\_MQTT = 1} y \texttt{MQTT\_HOST} con la IPv4
+        obtenida. Subir el programa; el Monitor Serie debe mostrar \texttt{\# MQTT conectado}.
+\end{enumerate}
+
+\subsection{Verificaci\'on de la cadena de datos}
+
+\textbf{Mosquitto.} Desde cualquier terminal:
+\begin{lstlisting}[style=bash]
+docker exec -it mosquitto mosquitto_sub -t "utec/gemelo/#" -v
+\end{lstlisting}
+Se observan los mensajes de \texttt{nodo1/co2}, \texttt{nodo2/audio} y
+\texttt{gateway/estado}. Este comando es solo un visor: cerrarlo no detiene el servidor.
+
+\textbf{InfluxDB.} En \emph{Data Explorer}, bucket \texttt{gemelo}, se verificaron las
+tablas \texttt{co2} y \texttt{audio}, sus campos, la etiqueta \texttt{grupo1} y las MAC de
+los nodos. InfluxDB almacena en UTC; la interfaz muestra la hora local (UTC$-5$).
+
+\subsection{Dashboard en Grafana}
+
+El dashboard se importa desde \arch{dashboard\_gemelo\_L418\_final.json}: Grafana $\rightarrow$
+Dashboards $\rightarrow$ New $\rightarrow$ Import $\rightarrow$ subir el archivo y elegir la
+fuente \emph{InfluxDB}. Se actualiza cada 10~s.
+
+\begin{table}[H]
+\centering
+\caption{Secciones del dashboard final.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Secci\'on} & \textbf{Contenido} \\
+\midrule
+Estado actual & Ocupaci\'on, puerta, CO$_2$, nivel de gas, $L_{eq}$, temperatura, humedad y luz sobre la mesa \\
+Salud de los nodos & Segundos desde el \'ultimo dato y paquetes perdidos de cada nodo \\
+Ocupaci\'on y puerta & Ocupaci\'on en el tiempo, entradas y salidas por minuto, franja de la puerta \\
+Calidad del aire & CO$_2$, \'indice Rs/R0, GLP equivalente y franja de niveles de CO$_2$ y gas \\
+Confort t\'ermico & Temperatura, humedad y presi\'on \\
+Ac\'ustica & $L_{eq}$ (promedio energ\'etico), $L_{max}$ y ruido de fondo \\
+Iluminaci\'on & Luz estimada sobre la mesa y luz medida en el techo \\
+Registro de anomal\'ias & Tabla \'unica de los siete sensores, con filtro por columna \\
+Exportar datos crudos & Fila plegada con una tabla por sensor, sin promediar \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{Filtro por grupo.} La variable \emph{Grupo} lista autom\'aticamente los grupos
+presentes en la base de datos; cuando otros grupos publiquen, aparecer\'an sin cambiar el
+dashboard.
+
+\textbf{Exportaci\'on CSV.} El usuario elige el rango de tiempo, abre la fila
+\emph{Exportar datos crudos} y, en el panel deseado, selecciona \emph{Inspect $\rightarrow$
+Data $\rightarrow$ Download CSV}. Se exporta desde esa fila porque las gr\'aficas agregan los
+datos seg\'un el rango (en 7 d\'ias cada punto representa varios minutos); la fila de
+exportaci\'on entrega cada medici\'on original.
+
+\textbf{Promedio energ\'etico en Flux.} La curva de $L_{eq}$ convierte cada valor a
+energ\'ia, promedia y vuelve a decibeles:
+\begin{lstlisting}[style=plano]
+|> map(fn: (r) => ({r with _value: math.pow(x: 10.0, y: r._value / 10.0)}))
+|> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)
+|> map(fn: (r) => ({r with _value: 10.0 * math.log10(x: r._value)}))
+\end{lstlisting}
+
+\begin{completar}
+\arch{dashboard\_gemelo\_L418\_final.json} no requiere cambios. Al importarlo solo se
+selecciona la fuente de datos InfluxDB; si ya exist\'ia una versi\'on anterior, se elige
+\emph{Import (Overwrite)}.
+\end{completar}
+
+% =====================================================================
+\section{Fase 4: Migraci\'on a la nube}
+
+\subsection{Cambios necesarios para exponer el servidor a internet}
+
+Los contenedores son los mismos; lo que cambia es la seguridad, porque el servidor queda
+accesible desde internet.
+
+\begin{table}[H]
+\centering
+\caption{Puertos expuestos en la nube.}
+\begin{tabularx}{\textwidth}{@{}llX@{}}
+\toprule
+\textbf{Puerto} & \textbf{Servicio} & \textbf{Protecci\'on} \\
+\midrule
+80 / 443 & Caddy $\rightarrow$ Grafana & HTTPS con certificado Let's Encrypt obtenido y
+renovado autom\'aticamente. \\
+8883 & Mosquitto & TLS, usuario y contrase\~na, permisos por grupo. \\
+22 & SSH & Solo desde la IP del administrador; acceso con llave privada. \\
+\midrule
+8086 & InfluxDB & No expuesto. Acceso solo por t\'unel SSH. \\
+3000, 1883 & Grafana, MQTT sin cifrar & No expuestos. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{itemize}
+  \item \textbf{Grafana p\'ublico de solo lectura.} Se habilita el acceso an\'onimo con rol
+        \emph{Viewer}: cualquier persona ve el dashboard, cambia el rango y descarga CSV, pero
+        no edita. No se usan los \emph{public dashboards} de Grafana porque no admiten la
+        variable \emph{Grupo}.
+  \item \textbf{MQTT por grupos.} Cada gateway usa como usuario el nombre de su grupo y, por
+        la lista de control de acceso, solo puede publicar en
+        \texttt{utec/gemelo/<su grupo>/\#}. Telegraf solo puede leer.
+  \item \textbf{TLS con autoridad certificadora propia.} El certificado de MQTT lo firma una
+        CA propia v\'alida por 10 a\~nos, grabada en el gateway. As\'i el gateway solo acepta
+        este servidor y no necesita reprogramarse cuando se renuevan los certificados
+        HTTPS (cada 90~d\'ias).
+\end{itemize}
+
+\subsection{Creaci\'on de la m\'aquina virtual en Azure for Students}
+
+Azure for Students otorga 100~USD de cr\'edito anual sin tarjeta de cr\'edito. Los servicios
+gratuitos incluyen 750 horas mensuales de los tama\~nos B1s, B2pts~v2 y B2ats~v2, suficiente
+para una VM encendida todo el mes (744 horas en un mes de 31 d\'ias).
+
+\begin{enumerate}
+  \item Activar la oferta en \url{https://azure.microsoft.com/free/students} con el correo
+        de UTEC y verificar en \emph{Suscripciones} que aparezca \emph{Azure for Students}.
+  \item En el portal, buscar \textbf{M\'aquinas virtuales} (no \emph{Operator Nexus}) y
+        elegir \emph{Crear $\rightarrow$ M\'aquina virtual de Azure}.
+\end{enumerate}
+
+\begin{table}[H]
+\centering
+\caption{Configuraci\'on de la m\'aquina virtual.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Campo} & \textbf{Valor} \\
+\midrule
+Grupo de recursos & \texttt{rg-gemelo} \\
+Nombre & \texttt{vm-gemelo} \\
+Regi\'on & Una de las permitidas por la suscripci\'on donde B2ats~v2 est\'e disponible
+(North Central US o Mexico Central) \\
+Imagen & Ubuntu Server 24.04 LTS -- x64 Gen2 \\
+Tama\~no & Standard\_B2ats\_v2 (2 vCPU, 1~GiB), apto para servicios gratuitos \\
+Autenticaci\'on & Clave p\'ublica SSH, usuario \texttt{azureuser}, par \texttt{vm-gemelo\_key} \\
+Disco del SO & 64~GiB, SSD Premium (P6) \\
+Puertos de entrada & Solo SSH (22) al crear \\
+Apagado autom\'atico & Desactivado \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{enumerate}[resume]
+  \item En \emph{Revisar y crear}, confirmar que el tama\~no sea B2ats~v2 (el valor por
+        defecto, D2s~v3, no es gratuito). Al crear, descargar la llave privada
+        \arch{vm-gemelo\_key.pem}; no se puede volver a descargar.
+  \item En la VM $\rightarrow$ Informaci\'on general $\rightarrow$ \emph{Nombre DNS},
+        asignar una etiqueta, por ejemplo \texttt{gemelo-l418}. La direcci\'on resultante,
+        del tipo \texttt{gemelo-l418.<regi\'on>.cloudapp.azure.com}, reemplaza la compra de
+        un dominio.
+  \item En \emph{Redes}, crear reglas de entrada para los puertos 80, 443 y 8883, y
+        restringir el origen de la regla SSH a la IP del administrador.
+\end{enumerate}
+
+\begin{nota}[Estado actual]
+Durante la creaci\'on se encontraron dos restricciones: (1) la suscripci\'on solo permite las
+regiones \texttt{northcentralus}, \texttt{westus}, \texttt{canadacentral}, \texttt{westus2} y
+\texttt{mexicocentral}; y (2) una directiva de la Gerencia de TI de UTEC bloquea la creaci\'on
+de recursos para proyectos no autorizados. Se solicit\'o a TI, a trav\'es del profesor y de
+Mesa de Ayuda, habilitar la creaci\'on de la VM o proporcionar una m\'aquina virtual
+institucional. Los pasos siguientes est\'an listos para ejecutarse cuando se obtenga el
+acceso.
+\end{nota}
+
+\subsection{Preparaci\'on de la m\'aquina virtual}
+
+\textbf{Conexi\'on por SSH desde la laptop.} Mover la llave a
+\arch{C:\textbackslash Users\textbackslash <usuario>\textbackslash .ssh\textbackslash} y
+restringir sus permisos (SSH rechaza llaves con permisos abiertos):
+\begin{lstlisting}[style=bash]
+$key = "C:\Users\Usuario\.ssh\vm-gemelo_key.pem"
+icacls $key /inheritance:r
+icacls $key /grant:r "$($env:USERNAME):(R)"
+ssh -i $key azureuser@<DOMINIO>
+\end{lstlisting}
+
+\textbf{Instalaci\'on de Docker y memoria swap} (dentro de la VM):
+\begin{lstlisting}[style=bash]
+sudo apt update && sudo apt upgrade -y
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker azureuser
+
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+\end{lstlisting}
+Tras volver a conectarse, verificar con \texttt{docker run hello-world} y \texttt{free -h}.
+La swap de 2~GB complementa el 1~GiB de RAM del tama\~no B2ats~v2; en la laptop, el stack
+completo us\'o unos 146~MB.
+
+\subsection{Servidor de producci\'on}
+
+Los archivos se encuentran en la carpeta \arch{servidor\_iot\_prod}:
+
+\begin{lstlisting}[style=plano]
+servidor_iot_prod/
+|-- .env
+|-- docker-compose.yml
+|-- preparar.sh
+|-- caddy/Caddyfile
+|-- mosquitto/config/mosquitto.conf
+|-- mosquitto/config/acl
+|-- telegraf/telegraf.conf
+|-- grafana/provisioning/datasources/influxdb.yml
+|-- grafana/provisioning/dashboards/dashboards.yml
+|-- grafana/dashboards/dashboard_gemelo_iot.json
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\caption{Archivos del servidor de producci\'on.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Archivo} & \textbf{Funci\'on} \\
+\midrule
+\arch{docker-compose.yml} & Cinco servicios (se agrega Caddy). L\'imite de tama\~no de logs
+para no llenar el disco. InfluxDB publicado solo en \texttt{127.0.0.1}. \\
+\arch{Caddyfile} & Proxy HTTPS hacia Grafana con certificado autom\'atico. \\
+\arch{mosquitto.conf} & Sin acceso an\'onimo. Listener interno 1883 (Telegraf) y externo
+8883 con TLS (gateways). \\
+\arch{acl} & Telegraf lee todo; cada gateway solo publica en los t\'opicos de su grupo. \\
+\arch{telegraf.conf} & Igual al local, con usuario y contrase\~na MQTT. \\
+\arch{dashboards.yml} y \arch{dashboard\_gemelo\_iot.json} & Cargan el dashboard
+autom\'aticamente como p\'agina de inicio, con actualizaci\'on cada 10~s. \\
+\arch{preparar.sh} & Genera la CA y el certificado TLS del broker, crea los usuarios MQTT y
+ajusta permisos. Se ejecuta una vez. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{completar}
+En \arch{servidor\_iot\_prod/.env} (contrase\~nas solo con letras y n\'umeros):
+\begin{itemize}
+  \item \texttt{DOMINIO}: nombre DNS de la VM (por ejemplo
+        \texttt{gemelo-l418.northcentralus.cloudapp.azure.com}).
+  \item \texttt{ACME\_EMAIL}: correo para avisos de Let's Encrypt.
+  \item \texttt{INFLUX\_PASSWORD}, \texttt{INFLUX\_TOKEN}, \texttt{GRAFANA\_ADMIN\_PASSWORD}.
+  \item \texttt{MQTT\_TELEGRAF\_PASS} y \texttt{MQTT\_GRUPO1\_PASS}.
+\end{itemize}
+Para integrar otro grupo, agregar en \arch{preparar.sh} una l\'inea
+\texttt{mosquitto\_passwd -b ... grupoN <clave>} y volver a ejecutarlo.
+\end{completar}
+
+\textbf{Despliegue.} Copiar la carpeta a la VM desde PowerShell y levantar el servidor:
+\begin{lstlisting}[style=bash]
+scp -i C:\Users\Usuario\.ssh\vm-gemelo_key.pem -r servidor_iot_prod azureuser@<DOMINIO>:~
+\end{lstlisting}
+\begin{lstlisting}[style=bash]
+cd servidor_iot_prod
+bash preparar.sh       # al final imprime el certificado ca.crt
+docker compose up -d
+\end{lstlisting}
+
+\subsection{Gateway para la nube}
+
+El archivo \arch{gateway\_nube.ino} (carpeta \arch{gateway\_nube}, junto con
+\arch{paquetes.h}) es el gateway final con \texttt{USAR\_TLS = 1}: decodifica los siete tipos,
+usa \texttt{WiFiClientSecure}, el puerto 8883 y usuario y contrase\~na, y espera a tener la hora
+NTP antes de conectarse, porque sin hora real no puede validar la vigencia del certificado. El
+usuario MQTT es el mismo valor de \texttt{GRUPO}, como exige la lista de control de acceso.
+
+\begin{completar}
+En \arch{gateway\_nube.ino}:
+\begin{itemize}
+  \item \texttt{WIFI\_SSID} y \texttt{WIFI\_PASS}: red WiFi de la universidad autorizada por TI
+        para el gateway (MAC \texttt{58:2A:BD:72:03:DC}). Los nodos deben tener el mismo valor
+        en \texttt{SSID\_ROUTER}.
+  \item \texttt{MQTT\_HOST}: el \texttt{DOMINIO} del \arch{.env}.
+  \item \texttt{GRUPO}: \texttt{grupo1}, igual al usuario creado en \arch{preparar.sh}
+        (\texttt{MQTT\_USER} toma este valor autom\'aticamente).
+  \item \texttt{MQTT\_PASS}: el valor de \texttt{MQTT\_GRUPO1\_PASS}.
+  \item \texttt{CA\_CERT}: el contenido completo de \arch{ca/ca.crt} impreso por
+        \arch{preparar.sh}, desde \texttt{-----BEGIN CERTIFICATE-----} hasta
+        \texttt{-----END CERTIFICATE-----}.
+\end{itemize}
+\end{completar}
+
+\subsection{Verificaci\'on en la nube}
+
+\begin{enumerate}
+  \item Abrir \texttt{https://<DOMINIO>} desde un celular con datos m\'oviles: el dashboard
+        debe cargarse sin iniciar sesi\'on.
+  \item Revisar que el Monitor Serie del gateway muestre \texttt{\# MQTT conectado}.
+  \item Para administrar InfluxDB, abrir un t\'unel SSH y entrar a
+        \url{http://localhost:8086} en la laptop:
+\begin{lstlisting}[style=bash]
+ssh -i C:\Users\Usuario\.ssh\vm-gemelo_key.pem -L 8086:localhost:8086 azureuser@<DOMINIO>
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{Control de costos}
+
+En \emph{Cost Management $\rightarrow$ Presupuestos} se cre\'o el presupuesto
+\texttt{presupuesto-gemelo}: 10~USD mensuales, vigente hasta octubre de 2027, con alertas al
+50\,\% y 80\,\% del gasto real y al 100\,\% del gasto previsto. El presupuesto solo notifica;
+si el cr\'edito se agotara, Azure deshabilitar\'ia los recursos sin cargos a tarjeta.
+
+% =====================================================================
+\section{Integraci\'on con el gemelo digital 2D}
+
+El gemelo digital 2D (repositorio Web-PI3) es una aplicaci\'on web que muestra el plano del aula
+con cada sensor coloreado seg\'un su estado. Su backend (FastAPI) \textbf{solo lee} de InfluxDB:
+cada 2~s consulta la \'ultima lectura de cada sensor, calcula su estado a partir del \texttt{nivel}
+y las \texttt{anomalias} que env\'ian los nodos, y env\'ia los cambios a los navegadores mediante
+\emph{Server-Sent Events} (SSE). Con muchos navegadores abiertos, InfluxDB recibe igualmente una
+sola consulta por ciclo.
+
+\begin{table}[H]
+\centering
+\caption{Requisitos de la arquitectura IoT para alimentar el gemelo 2D.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Requisito} & \textbf{Detalle} \\
+\midrule
+Acceso a InfluxDB & \texttt{http://localhost:8086} si el backend corre en el mismo equipo, o
+\texttt{http://influxdb:8086} si se agrega como servicio al \arch{docker-compose.yml} \\
+Token de solo lectura & Creado en InfluxDB con permiso \emph{Read} sobre el bucket \texttt{gemelo};
+nunca el token de administrador \\
+Mismo \texttt{GRUPO} & El backend filtra por la etiqueta \texttt{grupo}; debe coincidir con el
+\texttt{GRUPO} del gateway \\
+Cat\'alogo completo & El archivo \arch{sensores.yaml} debe declarar los siete sensores con los
+nombres exactos de tablas y campos de InfluxDB \\
+Demora & Con \texttt{flush\_interval = "1s"} en Telegraf, la demora sensor--plano queda en unos 3~s \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% =====================================================================
+\section{Resultados de la validaci\'on local}
+
+\begin{table}[H]
+\centering
+\caption{Resultados observados con el servidor en la laptop.}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Prueba} & \textbf{Resultado} \\
+\midrule
+Enlace ESP-NOW & Nodo CO$_2$: 0 paquetes perdidos. Nodo audio: 4 p\'erdidas al arranque y
+0 en una sesi\'on posterior de aproximadamente 2~h (m\'as de 6800 paquetes). \\
+Sincronizaci\'on & NTP correcto; canal WiFi 11; 0 paquetes descartados en el gateway. \\
+Latencia & El indicador de salud mostr\'o entre 2 y 10~s desde el \'ultimo dato. \\
+Recursos del servidor & Aproximadamente 146~MB de RAM y 0.5\,\% de CPU para los cuatro
+contenedores. \\
+CO$_2$ & Entre 560 y 620~ppm, estado Normal. Se observ\'o la respuesta del sensor ante
+exhalaci\'on. \\
+Audio & Niveles entre 82 y 87~dB con ruido de fondo estimado cercano a 83~dB. El valor
+sugiere una fuente de ruido cercana al micr\'ofono o la necesidad de calibrar
+\texttt{OFFSET\_SPL\_DB} con un son\'ometro. \\
+Exportaci\'on & Descarga CSV verificada; la representaci\'on se adapta al rango de tiempo. \\
+Nodos 3 a 7 & Verificados en simulaci\'on: conteo de personas (cruces, fusiones, retrocesos y
+falsos positivos), puerta (rebotes, zona intermedia, cable suelto), ambiente, luz (luces frente a
+nubes) y gas (niveles con hist\'eresis y persistencia de $R_0$). La prueba integrada de los siete
+nodos en el sal\'on se programa para el 17 de noviembre de 2026. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% =====================================================================
+\section{Problemas encontrados y soluciones}
+
+\begin{longtable}{@{}p{0.42\textwidth}p{0.53\textwidth}@{}}
+\caption{Problemas y soluciones.}\\
+\toprule
+\textbf{Problema} & \textbf{Soluci\'on} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Problema} & \textbf{Soluci\'on} \\
+\midrule
+\endhead
+ESP32 no detecta redes de 5~GHz. & Usar una red o hotspot configurado en 2.4~GHz. \\
+ESP-NOW falla si emisor y receptor est\'an en canales distintos. & Los nodos escanean la red
+del gateway para obtener su canal; re-escaneo tras 10 fallos. \\
+El gateway no conecta a MQTT en la laptop. & Usar la IPv4 del adaptador Wi-Fi (no
+vEthernet), perfil de red privado y regla de firewall para el puerto 1883. \\
+Promediar decibeles directamente da resultados incorrectos. & Promedio energ\'etico de
+$L_{eq}$ en la consulta Flux. \\
+Error en el panel \emph{Nivel sonoro} (funci\'on \texttt{math.pow10}). & Reemplazo por
+\texttt{math.pow(x: 10.0, y: ...)}. \\
+Las gr\'aficas exportan valores agregados. & Fila separada de exportaci\'on con datos
+crudos. \\
+Formulario equivocado en Azure (\emph{Operator Nexus}). & Usar el servicio
+\emph{M\'aquinas virtuales} est\'andar. \\
+B2ats~v2 no disponible en Brazil South
+(\texttt{NotAvailableForSubscription}). & Elegir una regi\'on permitida donde el tama\~no
+est\'e disponible. \\
+Directiva de regiones permitidas de la suscripci\'on. & Consultar la lista en
+\emph{Directiva $\rightarrow$ Tareas (asignaciones) $\rightarrow$ Par\'ametros}. \\
+Directiva de TI de UTEC que bloquea la creaci\'on de recursos. & Solicitud a TI y Mesa de
+Ayuda a trav\'es del profesor. \\
+Pines del ADC2 inutilizables con la radio activa. & Todas las entradas anal\'ogicas usan pines
+del ADC1 (GPIO 32 a 39). \\
+Salidas de 5~V del MQ-2 frente a un ADC de 3.3~V. & Divisores de tensi\'on de 10/15~k$\Omega$. \\
+C\'odigos de nodos con formatos de paquete distintos. & Un \'unico contrato (\arch{paquetes.h}) y
+una \'unica tabla de \texttt{NODO\_ID} para todo el sal\'on. \\
+Gateway sin conexi\'on a la red de la universidad. & Diagn\'ostico con \emph{WiFiScan} y el c\'odigo
+de \texttt{WiFi.status()}; red WPA2-Personal en 2.4~GHz. \\
+\bottomrule
+\end{longtable}
+
+% =====================================================================
+\section{Trabajo pendiente}
+
+\begin{enumerate}
+  \item Prueba integrada de los siete nodos en el sal\'on L418 (17 de noviembre de 2026).
+  \item Confirmar con TI la comunicaci\'on entre dispositivos en \emph{UTEC Proyectos} y la
+        habilitaci\'on de la m\'aquina virtual en la nube.
+  \item Calibrar el micr\'ofono con un son\'ometro y, como mejora, aplicar ponderaci\'on~A.
+  \item Calibrar $R_0$ del MQ-2 tras 24~h de precalentamiento y verificar $R_L$ y $V_C$.
+  \item Completar el cat\'alogo del gemelo 2D con los siete sensores y validar la lectura en tiempo real.
+  \item Validar el conteo de personas con conteos manuales en cambios de clase.
+\end{enumerate}
+
+% =====================================================================
+\section*{Referencias}
+\addcontentsline{toc}{section}{Referencias}
+\setlength{\parindent}{-1.2em}\setlength{\leftskip}{1.2em}
+
+Adafruit. (s.\ f.). \emph{Adafruit MLX90640 IR Thermal Camera Breakout - 55 Degree: Datasheet} [Product ID: 4407]. Adafruit Industries. Recuperado el 10 de noviembre de 2026, de \url{https://www.adafruit.com/product/4407}
+
+AG Electr\'onica. (2019). \emph{Sensor de presi\'on atmosf\'erica GY-BME280} (No. Parte: OKY3259-2). AG Electr\'onica S.A.P.I. de C.V. Recuperado el 10 de noviembre de 2026, de \url{https://agelectronica.com/detalle?busca=OKY3259-2}
+
+Handson Technology. (s.\ f.). \emph{BH1750 Ambient Light Sensor Module: Data Specs} (SKU: SSR1054). Handson Technology. Recuperado el 10 de noviembre de 2026, de \url{https://handsontec.com/index.php/product/bh1750-ambient-light-sensor-module/}
+
+Joy-IT. (2021). \emph{KY-024 Linear magnetic Hall Sensor: Manual} (SensorKit X40). Joy-IT / Simac Electronics B.V. Recuperado el 10 de noviembre de 2026, de \url{https://joy-it.net/en/products/SEN-KY024LM}
+
+Naylamp Mechatronics. (s.\ f.). \emph{Micr\'ofono I2S INMP441}. Naylamp Mechatronics. Recuperado el 10 de noviembre de 2026, de \url{https://naylampmechatronics.com/audio-sonido/1037-microfono-i2s-inmp441.html}
+
+Technologies Private Limited. (s.\ f.). \emph{ADIY MQ-2 Smoke Sensor Module: Datasheet}. ADIY. Recuperado el 10 de noviembre de 2026, de \url{https://adiy.in/shop/mq2-smoke-sensor-module/}
+
+Zhengzhou Winsen Electronics Technology Co., Ltd. (2023). \emph{Infrared CO2 Sensor (Model: MH-Z1911A): User's Manual} (Version 1.1). Winsen. Recuperado el 10 de noviembre de 2026, de \url{https://www.winsen-sensor.com/product/mh-z1911a.html?searchid=5618}
+
+\setlength{\parindent}{0pt}\setlength{\leftskip}{0pt}
+
+% =====================================================================
+\appendix
+\section{Repositorio y archivos}
+
+Repositorio del proyecto: \textbf{https://github.com/ARomuloChuquillanqui/gemelo-digital-L418.git}\\
+Gemelo digital 2D: \url{https://github.com/MaintzTachyon/Web-PI3}
+
+En el repositorio, el firmware est\'a en \arch{firmware/}, el servidor en \arch{servidor/}, los
+dashboards en \arch{grafana/} y este informe en \arch{docs/}.
+
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{0.30\textwidth}>{\raggedright\arraybackslash}p{0.24\textwidth}>{\raggedright\arraybackslash}p{0.40\textwidth}@{}}
+\caption{Archivos del proyecto y datos a completar.}\\
+\toprule
+\textbf{Archivo} & \textbf{Carpeta} & \textbf{Qu\'e completar} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Archivo} & \textbf{Carpeta} & \textbf{Qu\'e completar} \\
+\midrule
+\endhead
+\arch{paquetes.h} & todas las de ESP32 & Nada. Id\'entico en todas las copias. \\
+\arch{espnow\_nodo.h} & carpetas de los nodos & Nada. \\
+\arch{nodo\_co2.ino} & \arch{nodo\_co2} & \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER},
+\texttt{NODO\_ID = 1}. \\
+\arch{nodo\_audio.ino} & \arch{nodo\_audio} & \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER},
+\texttt{NODO\_ID = 2}, \texttt{OFFSET\_SPL\_DB} (calibraci\'on). \\
+\arch{nodo\_gas.ino} & \arch{nodo\_gas} & \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER},
+\texttt{R\_L}, \texttt{V\_C}; calibrar $R_0$ con \texttt{CAL}. \\
+\arch{nodo\_luz.ino} & \arch{nodo\_luz} & \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER},
+\texttt{FACTOR\_MESA}. \\
+\arch{nodo\_termico.ino} & \arch{nodo\_termico} & \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER},
+\texttt{SENTIDO\_ENTRADA}. \\
+\arch{nodo\_magnetico.ino} & \arch{nodo\_magnetico} & \texttt{MAC\_GATEWAY},
+\texttt{SSID\_ROUTER}, umbrales de puerta. \\
+\arch{nodo\_ambiente.ino} & \arch{nodo\_ambiente} & \texttt{MAC\_GATEWAY}, \texttt{SSID\_ROUTER},
+\texttt{HUM\_ALTA} (opcional). \\
+\arch{obtener\_mac.ino} & \arch{obtener\_mac} & Nada. \\
+\arch{gateway.ino} & \arch{gateway} & \texttt{WIFI\_SSID}, \texttt{WIFI\_PASS},
+\texttt{GRUPO}, \texttt{USAR\_MQTT}, \texttt{MQTT\_HOST} (IPv4 de la laptop). \\
+\arch{.env} & \arch{servidor\_iot} & \texttt{INFLUX\_PASSWORD}, \texttt{INFLUX\_TOKEN},
+\texttt{GRAFANA\_PASSWORD}. \\
+\arch{docker-compose.yml}, \arch{mosquitto.conf}, \arch{telegraf.conf}, \arch{influxdb.yml}
+& \arch{servidor\_iot} & Nada. \\
+\arch{dashboard\_gemelo\_\allowbreak L418\_final.json} & \arch{grafana} & Nada; elegir la fuente InfluxDB al
+importar. \\
+\arch{.env} & \arch{servidor\_iot\_prod} & \texttt{DOMINIO}, \texttt{ACME\_EMAIL},
+contrase\~nas de InfluxDB, Grafana y usuarios MQTT. \\
+\arch{preparar.sh} & \arch{servidor\_iot\_prod} & Nada; agregar usuarios de otros grupos
+cuando se integren. \\
+\arch{docker-compose.yml}, \arch{Caddyfile}, \arch{mosquitto.conf}, \arch{acl},
+\arch{telegraf.conf}, \arch{influxdb.yml}, \arch{dashboards.yml},
+\arch{dashboard\_gemelo\_iot.json} & \arch{servidor\_iot\_prod} & Nada (se carga autom\'aticamente). \\
+\arch{gateway\_nube.ino} & \arch{gateway\_nube} & \texttt{WIFI\_PASS}, \texttt{GRUPO},
+\texttt{MQTT\_HOST}, \texttt{MQTT\_PASS}, \texttt{CA\_CERT}. \\
+\bottomrule
+\end{longtable}
+
+\begin{nota}[Seguridad del repositorio]
+No subir al repositorio los archivos \arch{.env} con contrase\~nas reales, la llave
+\arch{vm-gemelo\_key.pem}, la carpeta \arch{ca/} ni los certificados generados. Publicar en
+su lugar versiones con valores de ejemplo.
+\end{nota}
+
+\section{Resumen de comandos}
+
+\begin{table}[H]
+\centering
+\caption{Comandos frecuentes.}
+\begin{tabularx}{\textwidth}{@{}>{\ttfamily\small}p{0.55\textwidth}X@{}}
+\toprule
+\normalfont\textbf{Comando} & \textbf{Uso} \\
+\midrule
+docker compose up -d & Levantar el servidor (en su carpeta) \\
+docker compose ps & Estado de los contenedores \\
+docker compose down & Detener sin borrar datos \\
+docker compose down -v & Detener y borrar todos los datos \\
+docker logs telegraf -{}-tail 20 & Revisar errores de ingesta \\
+docker exec -it mosquitto mosquitto\_sub -t "utec/gemelo/\#" -v & Ver mensajes MQTT en vivo
+(local) \\
+ipconfig & IPv4 de la laptop \\
+wsl -{}-shutdown & Reiniciar WSL si Docker no arranca \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\end{document}

@@ -1,0 +1,9 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Caddy obtiene y renueva solo el certificado HTTPS de Let's Encrypt
+{$DOMINIO} {
+	encode gzip
+	reverse_proxy grafana:3000
+}
